@@ -3,6 +3,7 @@
   "rewrites": [
     {
       "source": "/(.*)",
+      "outputDirectory": "dist",
       "destination": "/api/index"
     }
   ]
