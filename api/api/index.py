@@ -51,8 +51,8 @@ def upload_youtube_audio():
             yt_dlp_executable,  # <-- This now points to our downloaded file
             '-f', 'ba',
             '-S', '+abr,+tbr,+size',
-            '--http-chunk-size', '10M',
-            '--limit-rate', '60M',
+            '--http-chunk-size', '9M',
+            '--limit-rate', '38M',
             '--cookies', temp_cookie_file.name,
             '--extractor-args', extractor_args,
             '-o', '-',
