@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "build.sh",
+  "installCommand": "chmod 755 && build.sh",
   "rewrites": [
     {
       "source": "/(.*)",
