@@ -12,7 +12,6 @@ app = Flask(__name__)
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 UPLOAD_URL = 'https://manage.deepgram.com/storage/assets'
 
-
 @app.route('/upload-youtube-audio', methods=['POST'])
 def upload_youtube_audio():
     """
@@ -22,7 +21,6 @@ def upload_youtube_audio():
     if not DEEPGRAM_API_KEY:
         return jsonify({"error": "DEEPGRAM_API_KEY environment variable not set on the server."}), 500
 
-    # --- 1. Get data from client request ---
     payload = request.get_json()
     if not payload:
         return jsonify({"error": "Invalid JSON body."}), 400
@@ -35,60 +33,57 @@ def upload_youtube_audio():
         return jsonify({
             "error": "Missing required fields. 'video_url', 'cookies', and 'extractor_args' are all required."
         }), 400
+    
+    # --- IMPORTANT CHANGE: Define the full path to the yt-dlp executable ---
+    # `__file__` is the path to the current script (e.g., /var/task/api/index.py)
+    # `os.path.dirname` gets the directory of the script (e.g., /var/task/api/)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # We then join it with 'bin/yt-dlp' to get the full path to our executable
+    yt_dlp_executable = os.path.join(script_dir, 'bin', 'yt-dlp')
 
-    # --- 2. Use a temporary file for the received cookies ---
-    # This is safe for serverless environments as the file is cleaned up automatically
+
     with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix='.txt', encoding='utf-8') as temp_cookie_file:
         temp_cookie_file.write(cookies_content)
-        temp_cookie_file.flush()  # Ensure content is written to disk before yt-dlp reads it
+        temp_cookie_file.flush()
 
-        # --- 3. Build and run the yt-dlp command with client-provided args ---
+        # Build the command using the full path to our executable
         yt_dlp_command = [
-            'yt-dlp',
+            yt_dlp_executable,  # <-- This now points to our downloaded file
             '-f', 'ba',
             '-S', '+abr,+tbr,+size',
             '--http-chunk-size', '10M',
             '--limit-rate', '50M',
             '--cookies', temp_cookie_file.name,
             '--extractor-args', extractor_args,
-            '-o', '-',  # Output to stdout
+            '-o', '-',
             video_url
         ]
 
         try:
-            # Start the yt-dlp process to stream the audio
             yt_dlp_process = subprocess.Popen(
                 yt_dlp_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-
-            # --- 4. Stream the audio to Deepgram ---
+            
             headers = {
                 'Authorization': f'Token {DEEPGRAM_API_KEY}',
                 'Content-Type': 'audio/webm',
                 'accept': 'application/json'
             }
-
-            # The 'data' parameter streams the stdout from the subprocess
-            # directly to the POST request, which is highly memory-efficient.
+            
             response = requests.post(
                 UPLOAD_URL,
                 headers=headers,
                 data=yt_dlp_process.stdout
             )
-
-            # Check for errors from the yt-dlp process itself
+            
             _, stderr_output = yt_dlp_process.communicate()
             if yt_dlp_process.returncode != 0:
                 error_message = stderr_output.decode('utf-8', errors='ignore')
                 app.logger.error(f"yt-dlp error: {error_message}")
-                return jsonify({
-                    "error": "Failed to download audio from YouTube.",
-                    "details": error_message
-                }), 500
+                return jsonify({"error": "Failed to download audio from YouTube.", "details": error_message}), 500
 
-            # Forward the response from Deepgram to our client
             response.raise_for_status()
             return jsonify(response.json()), response.status_code
 
@@ -98,8 +93,10 @@ def upload_youtube_audio():
             app.logger.error(f"An unexpected error occurred: {e}")
             return jsonify({"error": "An unexpected server error occurred."}), 500
 
-# This is a catch-all route that can be useful for Vercel
+# This is a helpful catch-all route for testing if the API is alive
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
-    return jsonify({"message": "Welcome to the YouTube to Deepgram API. Use the /upload-youtube-audio endpoint."}), 200
+    if path == 'upload-youtube-audio':
+         return jsonify({"error": "This endpoint requires a POST request."}), 405
+    return jsonify({"message": "API is running. Send a POST request to /upload-youtube-audio"}), 200
