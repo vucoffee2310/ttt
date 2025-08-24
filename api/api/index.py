@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import requests
+import threading  # --- NEW: Import the threading module
 from flask import Flask, request, jsonify
 
 # The Flask app object must be named `app` for Vercel's WSGI server
@@ -11,6 +12,20 @@ app = Flask(__name__)
 # Get the Deepgram API key from Vercel's Environment Variables
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 UPLOAD_URL = 'https://manage.deepgram.com/storage/assets'
+
+# --- NEW: Helper function to log a stream in a separate thread ---
+def log_stream(stream, logger):
+    """Reads a stream line-by-line and logs it."""
+    try:
+        # iter(stream.readline, b'') is a non-blocking way to read lines
+        for line in iter(stream.readline, b''):
+            if line:
+                # Decode and strip newline characters before logging
+                logger.info(line.decode('utf-8', errors='ignore').strip())
+    except Exception as e:
+        logger.error(f"Error in log_stream thread: {e}")
+    finally:
+        stream.close()
 
 @app.route('/upload-youtube-audio', methods=['POST'])
 def upload_youtube_audio():
@@ -34,11 +49,7 @@ def upload_youtube_audio():
             "error": "Missing required fields. 'video_url', 'cookies', and 'extractor_args' are all required."
         }), 400
     
-    # --- IMPORTANT CHANGE: Define the full path to the yt-dlp executable ---
-    # `__file__` is the path to the current script (e.g., /var/task/api/index.py)
-    # `os.path.dirname` gets the directory of the script (e.g., /var/task/api/)
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # We then join it with 'bin/yt-dlp' to get the full path to our executable
     yt_dlp_executable = os.path.join(script_dir, 'bin', 'yt-dlp')
 
 
@@ -46,9 +57,10 @@ def upload_youtube_audio():
         temp_cookie_file.write(cookies_content)
         temp_cookie_file.flush()
 
-        # Build the command using the full path to our executable
         yt_dlp_command = [
-            yt_dlp_executable,  # <-- This now points to our downloaded file
+            yt_dlp_executable,
+            '--progress',  # --- NEW: Explicitly request progress updates
+            '--no-warnings', # Optional: to clean up the log a bit
             '-f', 'ba',
             '-S', '+abr,+tbr,+size',
             '--http-chunk-size', '9M',
@@ -60,34 +72,57 @@ def upload_youtube_audio():
         ]
 
         try:
+            # --- MODIFIED: Process handling with threading ---
+            app.logger.info(f"Starting yt-dlp with command: {' '.join(yt_dlp_command)}")
+            
+            # Start the yt-dlp subprocess
             yt_dlp_process = subprocess.Popen(
                 yt_dlp_command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE  # We will read from this in a separate thread
             )
             
+            # Create and start a thread to log stderr (progress updates)
+            # This runs in the background, printing progress as it happens
+            log_thread = threading.Thread(
+                target=log_stream,
+                args=(yt_dlp_process.stderr, app.logger)
+            )
+            log_thread.daemon = True  # Allows main program to exit even if thread is still running
+            log_thread.start()
+
             headers = {
                 'Authorization': f'Token {DEEPGRAM_API_KEY}',
-                'Content-Type': 'audio/webm',
+                'Content-Type': 'audio/webm', # yt-dlp with 'ba' often defaults to webm
                 'accept': 'application/json'
             }
             
+            # Stream the audio data directly from yt-dlp's stdout to Deepgram
+            # The `requests` library will read from the stream as it becomes available
             response = requests.post(
                 UPLOAD_URL,
                 headers=headers,
                 data=yt_dlp_process.stdout
             )
             
-            _, stderr_output = yt_dlp_process.communicate()
+            # Wait for the yt-dlp process to finish after the upload is complete
+            yt_dlp_process.wait()
+            # Wait for the logging thread to finish processing any remaining output
+            log_thread.join(timeout=2) 
+            
+            # Check the final return code of the process
             if yt_dlp_process.returncode != 0:
-                error_message = stderr_output.decode('utf-8', errors='ignore')
-                app.logger.error(f"yt-dlp error: {error_message}")
-                return jsonify({"error": "Failed to download audio from YouTube.", "details": error_message}), 500
+                # The detailed error should have already been logged by our thread
+                app.logger.error(f"yt-dlp exited with non-zero code: {yt_dlp_process.returncode}")
+                return jsonify({
+                    "error": "Failed to download audio from YouTube. Check server logs for details."
+                }), 500
 
             response.raise_for_status()
             return jsonify(response.json()), response.status_code
 
         except requests.exceptions.RequestException as e:
+            app.logger.error(f"Deepgram upload error: {e}")
             return jsonify({"error": "Failed to upload data to Deepgram.", "details": str(e)}), 500
         except Exception as e:
             app.logger.error(f"An unexpected error occurred: {e}")
