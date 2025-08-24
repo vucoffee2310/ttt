@@ -1,18 +1,10 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "installCommand": "bash build.sh"
-      }
-    }
-  ],
+  "buildCommand": "bash build.sh",
   "routes": [
     {
       "src": "/(.*)",
       "dest": "api/index.py"
     }
   ]
+}
 }
