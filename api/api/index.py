@@ -52,7 +52,7 @@ def upload_youtube_audio():
             '-f', 'ba',
             '-S', '+abr,+tbr,+size',
             '--http-chunk-size', '10M',
-            '--limit-rate', '50M',
+            '--limit-rate', '60M',
             '--cookies', temp_cookie_file.name,
             '--extractor-args', extractor_args,
             '-o', '-',
