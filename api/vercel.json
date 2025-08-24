@@ -1,10 +1,10 @@
 {
-  "buildCommand": "bash build.sh",
-  "routes": [
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "bash api/build.sh",
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "api/index.py"
+      "source": "/(.*)",
+      "destination": "/api/index"
     }
   ]
-}
 }
