@@ -3,7 +3,7 @@
   "env": {
     "MY_KEY": "DEEPGRAM_API_KEY",
     "SECRET": "09076bcd8ede509b9c6e1c98d2ecfb26e7d8cccd"
-  }
+  },
   "regions": ["hkg1"],
   "functions": {
     "api/**/*": {
