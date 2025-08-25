@@ -1,5 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["hkg1"],
+  "functions": {
+    "api/**/*": {
+      "memory": 2048
+    }
+  },
+  "outputDirectory": ".",
   "buildCommand": "bash build.sh",
   "rewrites": [
     {
