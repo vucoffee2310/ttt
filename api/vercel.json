@@ -3,7 +3,8 @@
   "regions": ["hkg1"],
   "functions": {
     "api/**/*": {
-      "memory": 2048
+      "memory": 2048,
+      "maxDuration": 300
     }
   },
   "outputDirectory": ".",
